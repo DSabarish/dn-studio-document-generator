@@ -1,0 +1,300 @@
+{
+  "Task": {
+    "description": "You are Pass 2 of a two-pass BRD generation pipeline. Generate a complete Business Requirement Document (BRD) by analyzing a meeting transcript JSON and populating the provided BRD template. Only the 'value', 'trace', and 'why_null' fields should be filled. The schema structure, descriptions, and formats must remain unchanged. For every populated 'value', add a 'trace' object linking to the source utterance from the transcript. CRITICAL: You have been provided a schema_decision object in the user prompt. You MUST use it to determine Section 6 module keys/labels and Section 7 NFR inclusion.",
+    "input": "Meeting Transcript JSON + schema_decision JSON + BRD_Template",
+    "output": "BRD JSON with populated value, trace, and why_null fields"
+  },
+  "Model Configuration": {
+    "temperature": 0,
+    "top_p": 1,
+    "presence_penalty": 0,
+    "frequency_penalty": 0,
+    "deterministic_output": true
+  },
+  "Input Specification": {
+    "Transcript JSON": {
+      "description": "A JSON array containing meeting conversation segments with utterance_id, speaker_name, start time, and text.",
+      "format": {
+        "utterance_id": "number",
+        "start": "number",
+        "end": "number",
+        "speaker_name": "string",
+        "text": "string"
+      }
+    },
+    "schema_decision JSON": {
+      "description": "Output from Pass 1 (schema decider). Contains the decided functional module keys/labels for Section 6 and the NFR include/exclude decisions for Section 7. You MUST follow this exactly.",
+      "format": {
+        "project_domain": "string",
+        "functional_modules": [{"key": "string", "label": "string", "rationale": "string"}],
+        "nfr_sections": [{"key": "string", "label": "string", "include": "boolean", "rationale": "string"}]
+      }
+    }
+  },
+  "Utterance ID Rules — CRITICAL": {
+    "description": "The transcript is a numbered array. utterance_id values are sequential integers starting at 0. The maximum valid utterance_id is (transcript_length - 1). You will be told the valid range in the user prompt under 'transcript_id_range'.",
+    "rules": [
+      "NEVER use an utterance_id that does not exist in the transcript array.",
+      "Before writing any trace, verify the utterance_id is within [0, transcript_length - 1].",
+      "If you are unsure which utterance supports a value, pick the closest valid one or set trace=null — never invent an ID.",
+      "NEVER extrapolate utterance_ids from timestamps or guess IDs that feel plausible.",
+      "speaker must be copied from the speaker_name field of that exact utterance — do not construct, prefix, or concatenate speaker names."
+    ]
+  },
+  "why_null Field Rules": {
+    "description": "EVERY field in the BRD has three output slots: value, trace, and why_null. When value is populated, why_null MUST be null. When value is null, why_null MUST be one of the six approved codes.",
+    "codes": {
+      "not_mentioned": "The topic was never raised in the meeting. No speaker touched on it.",
+      "deferred_by_participants": "Topic came up but was explicitly deferred — speakers said TBD, will decide later, need to check.",
+      "not_yet_agreed": "Topic was discussed but unresolved — no consensus reached by end of meeting.",
+      "schema_excluded": "NFR section marked include=false by Pass 1. Do not invent content.",
+      "insufficient_detail": "Topic was briefly mentioned but too vague to document a concrete requirement.",
+      "not_applicable": "Field structurally does not apply to this project type."
+    },
+    "selection_guidance": [
+      "DEFAULT: use 'not_mentioned' when the topic was never raised at all.",
+      "Use 'deferred_by_participants' ONLY when speakers explicitly said 'TBD', 'we'll decide later', 'I'll check', 'need to confirm'.",
+      "Use 'not_yet_agreed' ONLY when genuine back-and-forth occurred and was left unresolved.",
+      "Use 'schema_excluded' ONLY for NFR sections where schema_decision says include=false.",
+      "Use 'insufficient_detail' when a topic is named but concrete details are absent.",
+      "DISTINGUISH CAREFULLY: 'not_mentioned' means silence. 'insufficient_detail' means mentioned but vague. Do not conflate them.",
+      "For the As-Is process (4.1): if speakers never described the current process, use 'not_mentioned' — not 'insufficient_detail'.",
+      "For Phasing Plan items: each phase that was not discussed must have value=null and why_null='not_mentioned'.",
+      "For KPI Target sub-fields: if a metric was named but no numeric target was given, Target value=null and why_null='not_mentioned'."
+    ],
+    "critical_rules": [
+      "If value is non-null, why_null MUST be null.",
+      "If value is null, why_null MUST be one of the six codes — never null.",
+      "why_null is a CODE STRING, not free text.",
+      "NFR include=false → why_null='schema_excluded', always.",
+      "Do not use 'insufficient_detail' for topics that were never raised."
+    ]
+  },
+  "Hallucination Prevention Rules": {
+    "Business Drivers": [
+      "Only include drivers directly evidenced by specific utterances in the transcript.",
+      "Do NOT add generic filler: 'Operational Efficiency', 'Data-Driven Decision Making', 'Digital Transformation', 'Stakeholder Alignment' — unless a speaker said exactly that.",
+      "Each Business Driver must be traceable to a specific utterance_id. If you cannot point to one, do not include it.",
+      "Fewer honest drivers is always better than more padded ones."
+    ],
+    "As-Is Process (4.1)": [
+      "Only populate if speakers explicitly described how the process works TODAY.",
+      "If no speaker described the current process, set value=null, why_null='not_mentioned'.",
+      "Do not infer or reconstruct an As-Is from context clues."
+    ],
+    "Phasing Plan": [
+      "Only populate Phase entries that are explicitly discussed in the transcript.",
+      "If transcript only mentions two phases, populate Phase 1 and Phase 2. Set Phase 3: value=null, why_null='not_mentioned'.",
+      "Do not fabricate a Phase 3 because the template has a slot for it."
+    ],
+    "KPI Targets": [
+      "If a metric is mentioned but no numeric target was stated, set Target: value=null, why_null='not_mentioned'.",
+      "Never invent numeric targets."
+    ]
+  },
+  "3.3 Risks Structure Rule": {
+    "description": "CRITICAL — 3.3 Risks must be output as a flat array under the 'value' key only. Do NOT populate both 'value' and 'items' simultaneously.",
+    "correct_output": {
+      "3.3 Risks": {
+        "value": [
+          {"Risk": "Risk description", "Mitigation": "Mitigation description"},
+          {"Risk": "Risk description 2", "Mitigation": "Mitigation description 2"}
+        ],
+        "trace": [{"utterance_id": 12, "speaker": "SPEAKER_0", "timestamp": 45.2}],
+        "why_null": null
+      }
+    },
+    "forbidden": "Do NOT output items.Risk and items.Mitigation as scalar fields alongside a value array. The value array IS the complete risk list."
+  },
+  "Extraction Guidelines": {
+    "Project Information Extraction": {"description": "Identify project purpose, users, and business objective from the meeting."},
+    "Technology Stack Extraction": {"description": "Identify only technologies explicitly named in the discussion."},
+    "Architecture Extraction": {"description": "Identify system components and represent interactions as '[Source] -> [Destination]' strings."}
+  },
+  "Section 6 Dynamic Module Rules": {
+    "description": "CRITICAL — Section 6 module keys and labels are provided by schema_decision.functional_modules. Use them exactly.",
+    "rules": [
+      "Generate EXACTLY the module sections listed in schema_decision.functional_modules — no more, no less.",
+      "Use the exact key and label from schema_decision verbatim.",
+      "Do NOT generate Student/Parent/Teacher/Admin/Management modules unless schema_decision names them.",
+      "Each module: { 'description': '...', 'format': '...', 'value': [...], 'trace': [...], 'why_null': null }",
+      "If a module has no transcript evidence: value=null, trace=null, why_null='not_mentioned'."
+    ]
+  },
+  "Section 7 Dynamic NFR Rules": {
+    "description": "CRITICAL — NFR sections are only populated if schema_decision says include=true.",
+    "rules": [
+      "For include=false: value=null, trace=null, why_null='schema_excluded'.",
+      "For include=true: populate value only with content explicitly in the transcript.",
+      "NEVER invent performance numbers, SLA percentages, or latency targets.",
+      "NEVER invent compliance requirements."
+    ]
+  },
+  "Traceability Guidelines": {
+    "trace_item_format": {
+      "utterance_id": "number — must exist in transcript array",
+      "speaker": "string — copied exactly from speaker_name of that utterance",
+      "timestamp": "number — start time of that utterance"
+    },
+    "rules": [
+      "Every non-null value must have a trace.",
+      "If value is null, trace must be null.",
+      "Multiple source utterances → trace is an ARRAY of trace objects.",
+      "Single source utterance → trace is a single object.",
+      "NEVER fabricate utterance_ids. Prefer trace=null over an invented ID.",
+      "Copy speaker_name exactly from the utterance — never construct it."
+    ]
+  },
+  "Strict Rules": {
+    "No Hallucination": [
+      "Never invent information not stated in the transcript.",
+      "Do not fabricate utterance_ids outside the valid range.",
+      "Do not invent numeric targets, SLAs, compliance requirements, or filler objectives.",
+      "Do not pad Business Drivers or Assumptions with generic phrases."
+    ],
+    "Missing Information Handling": [
+      "value=null → why_null must be the most accurate code from the six approved values.",
+      "Never leave why_null as null when value is null.",
+      "A short accurate value beats a long hallucinated one."
+    ]
+  },
+  "Schema Population Rules": [
+    "Do not modify schema keys for sections 0–5 and 8–10.",
+    "Section 6: use ONLY keys/labels from schema_decision.functional_modules.",
+    "Section 7: why_null='schema_excluded' for include=false sections.",
+    "Populate only value, trace, and why_null fields.",
+    "3.3 Risks: flat array under value — not items.Risk / items.Mitigation.",
+    "0. Document Revisions and 0. Stakeholder Approvals are TOP-LEVEL keys — not nested inside 0. Project Details.",
+    "All trace utterance_ids must be within the valid range from transcript_id_range."
+  ],
+  "Output Format": {
+    "format": "JSON",
+    "rules": ["Start with {", "End with }", "Zero prose", "Zero markdown fences", "Complete entire JSON — do NOT truncate"]
+  },
+  "BRD_Template": {
+    "Header": {
+      "Project Name": {"description": "Full official project name.", "format": "String — Title Case", "value": null, "trace": null, "why_null": null},
+      "Version": {"description": "Always '0.1 (Draft)' for first AI draft.", "format": "String", "value": null, "trace": null, "why_null": null},
+      "Date": {"description": "Meeting date if available, else today.", "format": "String — YYYY-MMM-DD", "value": null, "trace": null, "why_null": null},
+      "Business Unit": {"description": "Org unit owning this project.", "format": "String", "value": null, "trace": null, "why_null": null},
+      "Project Type": {"description": "One of: Data Platform, ML/AI, Dashboard/BI, API Integration, ETL Pipeline, DevOps/Infrastructure, Web Application.", "format": "String", "value": null, "trace": null, "why_null": null},
+      "Deployment Model": {"description": "Hosting model.", "format": "String — 'Cloud (Provider)' | 'On-Premise' | 'Hybrid' | 'SaaS'", "value": null, "trace": null, "why_null": null},
+      "Primary Data Store": {"description": "Main storage system — only if named in transcript.", "format": "String", "value": null, "trace": null, "why_null": null},
+      "Compute Engine": {"description": "Runtime environment — only if named in transcript.", "format": "String", "value": null, "trace": null, "why_null": null},
+      "Infrastructure": {"description": "IaC + CI/CD — only if named in transcript.", "format": "String — '[IaC] + [CI/CD]'", "value": null, "trace": null, "why_null": null},
+      "Document Status": {"description": "Always 'Draft' for first AI draft.", "format": "String", "value": null, "trace": null, "why_null": null}
+    },
+    "0. Project Details": {
+      "Project Overview": {"description": "2-4 sentence plain-English executive summary.", "format": "String", "value": null, "trace": null, "why_null": null},
+      "Business Need": {"description": "1-3 sentences on the specific problem being solved.", "format": "String", "value": null, "trace": null, "why_null": null},
+      "Success Criteria": {"description": "Binary verifiable completion conditions. Minimum 3.", "format": "Array of strings", "value": null, "trace": null, "why_null": null}
+    },
+    "0. Document Revisions": {
+      "description": "Audit trail of document versions. For first AI draft, create one entry.",
+      "format": "Array of objects with Version, Date, Author, Description",
+      "value": null,
+      "trace": null,
+      "why_null": null
+    },
+    "0. Stakeholder Approvals": {
+      "description": "People who must approve this BRD. Derive from transcript speakers.",
+      "format": "Array of objects with Name, Role, Status",
+      "value": null,
+      "trace": null,
+      "why_null": null
+    },
+    "1. Introduction": {
+      "1.1 Project Summary": {"description": "3-6 sentence technical summary.", "format": "String", "value": null, "trace": null, "why_null": null},
+      "1.2 Objectives": {
+        "description": "Objectives split into Primary and Secondary.",
+        "format": "Object with Primary and Secondary arrays",
+        "items": {
+          "Primary": {"description": "Must-have objectives from transcript.", "format": "Array of strings starting with verbs", "value": null, "trace": null, "why_null": null},
+          "Secondary": {"description": "Valuable but non-blocking objectives from transcript.", "format": "Array of strings", "value": null, "trace": null, "why_null": null}
+        }
+      },
+      "1.3 Background & Business Context": {"description": "2-4 sentences on history making this project necessary.", "format": "String", "value": null, "trace": null, "why_null": null},
+      "1.4 Business Drivers": {
+        "description": "Strategic forces driving this project. ONLY items directly traceable to transcript utterances. No generic filler.",
+        "format": "Array of strings — each traceable to a specific utterance",
+        "value": null,
+        "trace": null,
+        "why_null": null
+      }
+    },
+    "2. Project Scope": {
+      "2.1 In-Scope Functionality": {"description": "Features explicitly included.", "format": "Array of strings", "value": null, "trace": null, "why_null": null},
+      "2.2 Out-of-Scope Functionality": {"description": "Features explicitly excluded.", "format": "Array of strings", "value": null, "trace": null, "why_null": null},
+      "2.3 Phasing Plan": {
+        "description": "Only populate phases explicitly discussed. Set value=null, why_null='not_mentioned' for undiscussed phases.",
+        "format": "Object with Phase 1, Phase 2, Phase 3",
+        "items": {
+          "Phase 1": {"description": "First delivery phase.", "value": null, "trace": null, "why_null": null},
+          "Phase 2": {"description": "Second delivery phase.", "value": null, "trace": null, "why_null": null},
+          "Phase 3": {"description": "Third delivery phase. Set null+not_mentioned if not discussed.", "value": null, "trace": null, "why_null": null}
+        }
+      }
+    },
+    "3. System Perspective": {
+      "3.1 Assumptions": {"description": "Conditions treated as true without formal confirmation.", "format": "Array of strings", "value": null, "trace": null, "why_null": null},
+      "3.2 Constraints": {"description": "Fixed limitations.", "format": "Array of strings", "value": null, "trace": null, "why_null": null},
+      "3.3 Risks": {
+        "description": "Risk/mitigation pairs as a flat array under 'value'. Do NOT use items.Risk / items.Mitigation.",
+        "format": "Array of objects: [{Risk: string, Mitigation: string}]",
+        "value": null,
+        "trace": null,
+        "why_null": null
+      }
+    },
+    "4. Business Process Overview": {
+      "4.1 Current Process (As-Is)": {
+        "description": "Steps of current process TODAY — only if explicitly described by speakers. If never discussed: value=null, why_null='not_mentioned'.",
+        "format": "Array of strings — ordered steps",
+        "value": null,
+        "trace": null,
+        "why_null": null
+      },
+      "4.2 Proposed Process (To-Be)": {"description": "Future workflow steps from transcript discussion.", "format": "Array of strings", "value": null, "trace": null, "why_null": null}
+    },
+    "5. KPI & Success Metrics": {
+      "description": "Metrics and targets ONLY from transcript. Format as array of {Metric, Target} objects. If a metric has no stated target, set Target to null with a note.",
+      "format": "Array of objects: [{Metric: string, Target: string|null}]",
+      "value": null,
+      "trace": null,
+      "why_null": null
+    },
+    "6. Functional Requirements": {
+      "INSTRUCTION": "Generate module sections EXACTLY as listed in schema_decision.functional_modules.",
+      "Priority Rating Scale": {
+        "description": "Priority code legend.",
+        "items": {
+          "P1": {"description": "Must Have — blocking requirement.", "value": null, "trace": null, "why_null": null},
+          "P2": {"description": "Should Have — deferrable with stakeholder agreement.", "value": null, "trace": null, "why_null": null},
+          "P3": {"description": "Nice to Have — future planning only.", "value": null, "trace": null, "why_null": null}
+        }
+      }
+    },
+    "7. Non-Functional Requirements": {
+      "INSTRUCTION": "For include=false sections: value=null, trace=null, why_null='schema_excluded'. For include=true: populate from transcript only.",
+      "7.1 Performance & Scalability": {"description": "Performance requirements from transcript only.", "format": "Array of strings", "value": null, "trace": null, "why_null": null},
+      "7.2 Availability & Reliability": {"description": "Uptime/resilience requirements from transcript only.", "format": "Array of strings", "value": null, "trace": null, "why_null": null},
+      "7.3 Usability & Accessibility": {"description": "UX requirements from transcript only.", "format": "Array of strings", "value": null, "trace": null, "why_null": null},
+      "7.4 Security & Access Control": {"description": "Security requirements from transcript only.", "format": "Array of strings", "value": null, "trace": null, "why_null": null},
+      "7.5 Compliance & Regulatory": {"description": "Compliance requirements from transcript only.", "format": "Array of strings", "value": null, "trace": null, "why_null": null}
+    },
+    "8. Data Governance & Privacy": {
+      "8.1 Data Classification": {"description": "Data asset classification — only if discussed.", "format": "Object", "value": null, "trace": null, "why_null": null},
+      "8.2 Data Privacy Checklist": {"description": "Privacy decisions confirmed in transcript.", "format": "Array of strings", "value": null, "trace": null, "why_null": null}
+    },
+    "9. Technology Stack & Architecture": {
+      "9.1 Proposed Technology Stack": {"description": "Layer to technology mapping. Only technologies named in transcript.", "format": "Object", "value": null, "trace": null, "why_null": null},
+      "9.2 Architecture Diagram": {"description": "Data flow as array of '[A] -> [B]' strings.", "format": "Object with 'Flow' array", "value": null, "trace": null, "why_null": null}
+    },
+    "10. Appendices": {
+      "10.1 Glossary of Terms": {"description": "Domain terms used in this document.", "format": "Object — term: definition", "value": null, "trace": null, "why_null": null},
+      "10.2 List of Acronyms": {"description": "All acronyms used.", "format": "Array of strings", "value": null, "trace": null, "why_null": null},
+      "10.3 Related Documents": {"description": "Related documents.", "format": "Array of strings", "value": null, "trace": null, "why_null": null},
+      "10.4 Document Sign-Off": {"description": "Final sign-off table.", "format": "Array of objects with Name, Role, Date, Signature", "value": null, "trace": null, "why_null": null}
+    }
+  }
+}

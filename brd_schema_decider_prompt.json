@@ -1,0 +1,127 @@
+{
+  "Task": {
+    "description": "You are Pass 1 of a two-pass BRD generation pipeline. Your ONLY job is to read the meeting transcript and decide: (1) what functional module sections should exist in Section 6, and (2) which NFR categories in Section 7 have actual evidence in the transcript. You do NOT generate any BRD content. You output ONLY a decision JSON.",
+    "input": "Meeting Transcript JSON",
+    "output": "Schema Decision JSON — small, no BRD content"
+  },
+  "Model Configuration": {
+    "temperature": 0,
+    "top_p": 1,
+    "deterministic_output": true
+  },
+  "Instructions": {
+    "Step 1 — Identify Project Domain": {
+      "description": "Read the transcript and identify what industry and system type this project belongs to. Examples: workforce planning tool, e-commerce platform, school management system, healthcare portal, logistics tracker. Write this as a short label.",
+      "rule": "Never default to education domain (Student/Parent/Teacher) unless the transcript explicitly mentions students, parents, or teachers."
+    },
+    "Step 2 — Identify Functional Modules": {
+      "description": "Identify the distinct user-facing modules, feature areas, or role-based groups that are explicitly discussed in the transcript. Each module becomes one section key under Section 6.",
+      "rules": [
+        "Derive module names ONLY from roles, features, or workflows mentioned in the transcript",
+        "If the transcript discusses one unified feature area with no distinct user roles, create ONE module section (e.g. '6.1 Core Feature Requirements') plus '6.2 General / Cross-Cutting Requirements'",
+        "If the transcript discusses multiple distinct user roles (e.g. Admin vs End User), create one section per role",
+        "Always include a final 'General / Cross-Cutting Requirements' section for requirements that span all modules",
+        "Use keys '6.1', '6.2', '6.3' etc. in ascending order",
+        "Maximum 6 module sections",
+        "Never fabricate modules not evidenced in the transcript"
+      ]
+    },
+    "Step 3 — Decide NFR Sections": {
+      "description": "For each of the 5 standard NFR categories, decide whether the transcript contains actual evidence for it. Set include=true only if the transcript explicitly mentions something in that category.",
+      "categories": {
+        "7.1 Performance & Scalability": "Include if transcript mentions load, speed, data volume, concurrent users, latency, or scale",
+        "7.2 Availability & Reliability": "Include if transcript mentions uptime, downtime, deployment environments, go-live dates, or reliability",
+        "7.3 Usability & Accessibility": "Include if transcript mentions user experience, accessibility, ease of use, UI feedback, or usability testing",
+        "7.4 Security & Access Control": "Include if transcript mentions authentication, SSO, IP restrictions, access control, permissions, or security",
+        "7.5 Compliance & Regulatory": "Include if transcript mentions legal requirements, data regulations, PII, PHI, compliance mandates, or audit requirements"
+      },
+      "rule": "If in doubt, set include=false. It is better to leave a section null than to hallucinate NFR content."
+    }
+  },
+  "Output Format": {
+    "description": "Return ONLY valid JSON matching the schema below. No prose. No markdown fences. No BRD content.",
+    "schema": {
+      "project_domain": "string — short label describing the industry and system type",
+      "functional_modules": [
+        {
+          "key": "string — e.g. '6.1'",
+          "label": "string — e.g. 'Retention Tab Requirements'",
+          "rationale": "string — one sentence explaining why this module exists based on the transcript"
+        }
+      ],
+      "nfr_sections": [
+        {
+          "key": "string — e.g. '7.1'",
+          "label": "string — standard NFR category label",
+          "include": "boolean — true only if transcript has evidence",
+          "rationale": "string — one sentence citing the transcript evidence, or 'No evidence in transcript' if false"
+        }
+      ]
+    },
+    "example_output": {
+      "project_domain": "Workforce planning dashboard — utilities industry",
+      "functional_modules": [
+        {
+          "key": "6.1",
+          "label": "Retention Tab Requirements",
+          "rationale": "The entire transcript discusses requirements for a new Retention tab showing headcount, attrition, and apprentice hiring data."
+        },
+        {
+          "key": "6.2",
+          "label": "Filter & Model Selection Requirements",
+          "rationale": "Speaker 1 explicitly discusses 27 model iterations filtered by Overtime %, Sick Days, and Hours Per Day."
+        },
+        {
+          "key": "6.3",
+          "label": "General / Cross-Cutting Requirements",
+          "rationale": "Deployment pipeline, CI/CD, and access control requirements apply across the whole application."
+        }
+      ],
+      "nfr_sections": [
+        {
+          "key": "7.1",
+          "label": "Performance & Scalability",
+          "include": true,
+          "rationale": "Transcript mentions 27 model iterations and 162 rows of data that must load and filter responsively."
+        },
+        {
+          "key": "7.2",
+          "label": "Availability & Reliability",
+          "include": true,
+          "rationale": "Transcript explicitly targets QA environment delivery by end of March 2026 and discusses CI/CD pipeline reliability."
+        },
+        {
+          "key": "7.3",
+          "label": "Usability & Accessibility",
+          "include": true,
+          "rationale": "Transcript discusses filter UX consistency with existing Headcount tab and chart prototype sign-off process."
+        },
+        {
+          "key": "7.4",
+          "label": "Security & Access Control",
+          "include": true,
+          "rationale": "Transcript explicitly discusses IP allowlisting, SSO configuration, GCP admin access restrictions, and Docker security vulnerabilities."
+        },
+        {
+          "key": "7.5",
+          "label": "Compliance & Regulatory",
+          "include": false,
+          "rationale": "No evidence in transcript of legal, regulatory, PII, or compliance requirements."
+        }
+      ]
+    }
+  },
+  "Strict Rules": {
+    "No Hallucination": [
+      "Never invent modules not discussed in the transcript",
+      "Never set include=true for an NFR category without transcript evidence",
+      "Never output BRD content — only the schema decision"
+    ],
+    "Output Rules": [
+      "Output ONLY valid JSON",
+      "Start with { end with }",
+      "Zero prose, zero markdown fences",
+      "Include rationale for every decision so Pass 2 can reference it"
+    ]
+  }
+}
